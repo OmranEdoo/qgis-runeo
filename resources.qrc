@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/plugins/createur_branchement" >
+        <file>icon.png</file>
+    </qresource>
+</RCC>
