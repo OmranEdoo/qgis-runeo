@@ -272,12 +272,12 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
                         if b.geometry().intersects(c.geometry()):
                             feedback.pushInfo("c good")
                             pointDesserte = QgsFeature(pointDesserteFields)
-                            pointDesserte.setAttributes([a.QgsFeatureRequest().setFilterFid(0), a.QgsFeatureRequest().setFilterFid(5), a.id(), date, 'C'])
+                            pointDesserte.setAttributes([a['fid'], a['Adresse complète'], a.id(), date, 'C'])
                             pointDesserte.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(a.geometry().asPoint())))
                             sinkPointDesserte.addFeature(pointDesserte, QgsFeatureSink.FastInsert)
                             break
-        
-        canalisation = QgsProject.instance().mapLayersByName('civis aep_canalisation')
+        """ cest ca la suite ______________________
+        canalisation = QgsProject.instance().mapLayersByName('civis aep_canalisation')[0]
 
         indexSaptial = QgsSpatialIndex()
         carac = QgsFeature()
@@ -286,9 +286,13 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
         while fit.nextFeature(carac):
             indexSaptial.insertFeature(carac)
 
-        for point in pointDesserte.dataProvider().getFeatures():
-            plusProcheId = indexSaptial.nearestNeighbor(point, 1)
+        for point in pointDesserte:
+            plusProcheId = indexSaptial.nearestNeighbor(point, 1)[0]
+            fit2 = canalisation.getFeatures(QgsFeatureRequest().setFilterFid(plusProcheId))
+            carac2 = QgsFeature()
+            fit2.nextFeature(carac2)
             feedback.pushInfo(str(plusProcheId))
+        """
             
 
         """
