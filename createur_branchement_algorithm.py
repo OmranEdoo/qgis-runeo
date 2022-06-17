@@ -140,6 +140,7 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
         #Création des champs des couches de sortie
         pointDesserteFields = QgsFields()
         pointDesserteFields.append(QgsField('id', QVariant.Int, '', 254, 0))
+        pointDesserteFields.append(QgsField('parcelle_id', QVariant.Int, '', 254, 0))
         pointDesserteFields.append(QgsField('nom voie', QVariant.String, '', 254, 0))
         pointDesserteFields.append(QgsField('adresse complète', QVariant.String, '', 254, 0))
         pointDesserteFields.append(QgsField('date', QVariant.String, '', 254, 0))
@@ -147,6 +148,7 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
 
         branchementFields = QgsFields()
         branchementFields.append(QgsField('id', QVariant.Int, '', 254, 0))
+        branchementFields.append(QgsField('parcelle_id', QVariant.Int, '', 254, 0))
         branchementFields.append(QgsField('date', QVariant.String, '', 254, 0))
         branchementFields.append(QgsField('prec_clas', QVariant.Char, '', 254, 0))
 
@@ -264,6 +266,9 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
                 context.temporaryLayerStore().addMapLayer(batiment)
                 context.addLayerToLoadOnCompletion(batiment.id(), QgsProcessingContext.LayerDetails('BATIMENT', context.project(), 'BATIMENT'))
 
+        feedback.setProgress(10)
+        feedback.pushInfo("Les couches de la BD PARCELLAIRE ont été créée")
+
         batimentIds = []
         
         for a in communeData.getFeatures():
@@ -280,64 +285,52 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
         pointsRestants = []
 
         for a in sourceAdresse.getFeatures():
+            estPointDesserte = False
             for b in parcelleData.getFeatures():
                 if a.geometry().intersects(b.geometry()):
                     for c in batimentData.getFeatures():
                         if b.geometry().intersects(c.geometry()):
                             pointDesserte = QgsFeature(pointDesserteFields)
-                            pointDesserte.setAttributes([a['fid'], a['Adresse complète'], a.id(), date, 'C'])
+                            pointDesserte.setAttributes([a['fid'], b['parcelle_id'], a['NOM VOIE'], a['Adresse complète'], date, 'C'])
                             pointDesserte.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(a.geometry().asPoint())))
                             sinkPointDesserte.addFeature(pointDesserte, QgsFeatureSink.FastInsert)
                             pointsDesserte.append(pointDesserte)
+                            estPointDesserte = True
                             break
-                        else:
-                            point = QgsFeature(pointDesserteFields)
-                            point.setAttributes([a['fid'], a['NOM VOIE'], a['Adresse complète'], date, 'C'])
-                            point.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(a.geometry().asPoint())))
-                            pointsRestants.append(point)
-        
-        indexSaptial = QgsSpatialIndex()
-        carac = QgsFeature()
-        fit = sourceCanalisation.getFeatures()
+                if not estPointDesserte:
+                    point = QgsFeature(pointDesserteFields)
+                    point.setAttributes([a['fid'], b['parcelle_id'], a['NOM VOIE'], a['Adresse complète'], date, 'C'])
+                    point.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(a.geometry().asPoint())))
+                    pointsRestants.append(point)
 
-        while fit.nextFeature(carac):
-            indexSaptial.insertFeature(carac)
+        feedback.setProgress(30)
+        feedback.pushInfo("Les premiers points de desserte ont été créé")
+        
+        indexSaptialCanalisation = QgsSpatialIndex(sourceCanalisation.getFeatures(), flags=QgsSpatialIndex.FlagStoreFeatureGeometries)
 
         branchements = []
 
         for i, point in enumerate(pointsDesserte):
-            plusProcheId = indexSaptial.nearestNeighbor(point.geometry().asPoint(), 1)[0]
-            fit2 = sourceCanalisation.getFeatures(QgsFeatureRequest().setFilterFid(plusProcheId))
-            carac2 = QgsFeature()
-            fit2.nextFeature(carac2)
+            plusProcheId = indexSaptialCanalisation.nearestNeighbor(point.geometry())[0]
+            fitCanalisation2 = sourceCanalisation.getFeatures(QgsFeatureRequest().setFilterFid(plusProcheId))
+            caracCanalisation2 = QgsFeature()
+            fitCanalisation2.nextFeature(caracCanalisation2)
 
-            pointSurLigne = carac2.geometry().closestSegmentWithContext(QgsPointXY(point.geometry().asPoint()))[1]
+            pointSurLigne = caracCanalisation2.geometry().closestSegmentWithContext(QgsPointXY(point.geometry().asPoint()))[1]
 
             branchement = QgsFeature(branchementFields)
             branchement.setGeometry(QgsGeometry.fromPolylineXY([QgsPointXY(point.geometry().asPoint()), QgsPointXY(pointSurLigne[0], pointSurLigne[1])]))
-            branchement.setAttributes([i, date, 'C'])
+            branchement.setAttributes([i, caracCanalisation2['parcelle_id'], date, 'C'])
             branchements.append(branchement)
             sinkBranchement.addFeature(branchement, QgsFeatureSink.FastInsert)
 
+        feedback.setProgress(40)
+        feedback.pushInfo("Les premiers branchement ont été créé")
 
-        indexSaptialParcelle = QgsSpatialIndex()
-        caracParcelle = QgsFeature()
-        fitParcelle = parcelleData.getFeatures()
-
-        while fitParcelle.nextFeature(caracParcelle):
-            indexSaptialParcelle.insertFeature(caracParcelle)
-
-        indexSaptialCanalisation = QgsSpatialIndex()
-        caracCanalisation = QgsFeature()
-        fitCanalisation = sourceCanalisation.getFeatures()
-
-        while fitCanalisation.nextFeature(caracCanalisation):
-            indexSaptialCanalisation.insertFeature(caracCanalisation)
-
-        feedback.pushInfo(str(len(pointsRestants)))
+        indexSaptialParcelle = QgsSpatialIndex(parcelleData.getFeatures(), flags=QgsSpatialIndex.FlagStoreFeatureGeometries)
 
         for i, point in enumerate(pointsRestants):
-            plusProcheIdParcelle = indexSaptialParcelle.nearestNeighbor(point.geometry().asPoint(), 1)[0]
+            plusProcheIdParcelle = indexSaptialParcelle.nearestNeighbor(point.geometry())[0]
             fitParcelle2 = parcelleData.getFeatures(QgsFeatureRequest().setFilterFid(plusProcheIdParcelle))
             caracParcelle2 = QgsFeature()
             fitParcelle2.nextFeature(caracParcelle2)
@@ -352,11 +345,42 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
             pointSurLigne = caracCanalisation2.geometry().closestSegmentWithContext(QgsPointXY(point.geometry().asPoint()))[1]
 
             branchement = QgsFeature(branchementFields)
-            branchement.setGeometry(QgsGeometry.fromPolylineXY([QgsPointXY(pointSurLigne[0], pointSurLigne[1]), QgsPointXY(pointSurParcelle[0], pointSurParcelle[1])]))
-            branchement.setAttributes([len(pointsDesserte)+i, date, 'C'])
+            pointDesserte = QgsFeature(pointDesserteFields)
+
+            x1, y1 = pointSurLigne[0], pointSurLigne[1]
+            x2, y2 = pointSurParcelle[0], pointSurParcelle[1]
+            pente = (y2 - y1)/(x2 - x1)
+            k = 1
+            if x2 > x1:
+                x2 += pente*k
+            else:
+                x2 -= pente*k
+            if y2 > y1:
+                y2 += pente*k
+            else:
+                y2 -= pente*k
+
+            pointDesserte.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(x2, y2)))
+            pointDesserte.setAttributes([len(pointsDesserte)+i, caracParcelle2.id(), point['NOM VOIE'], point['Adresse complète'], date, 'C'])
+            pointsDesserte.append(pointDesserte)
+            sinkPointDesserte.addFeature(pointDesserte, QgsFeatureSink.FastInsert)
+
+            branchement.setGeometry(QgsGeometry.fromPolylineXY([QgsPointXY(x1, y1), QgsPointXY(x2, y2)]))
+            branchement.setAttributes([len(pointsDesserte)+i, caracParcelle2.id(), date, 'C'])
             branchements.append(branchement)
             sinkBranchement.addFeature(branchement, QgsFeatureSink.FastInsert)
+        
+        parcellesIds = []
+        pointsAChanger = []
 
+        for point in pointsDesserte:
+            parcellesIds.append(point['parcelle_id'])
+        
+        for point in pointsDesserte:
+            if pointsDesserte.count(point['parcelle_id']) != 1:
+                pointsAChanger.append(point)
+        
+        feedback.pushInfo(str(len(pointsAChanger)))
 
         """
         clusters = {}
