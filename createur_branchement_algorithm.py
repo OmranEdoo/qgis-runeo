@@ -397,7 +397,7 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
 
         batiment.invertSelection()
 
-        #☻compter nb elt pr feedb
+        ###compter nb elt pr feedb
 
         for f in batiment.getSelectedFeatures():
             batimentIds.append(f.id())
@@ -425,6 +425,7 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
 
         pointsDouble = []
 
+        # Recherche de points double
         for adr in adresse.getFeatures():
             params = {"INPUT": adresse, "FIELD": "Latitude", "VALUE": adr['Latitude']}
             processing.run("qgis:selectbyattribute", params)
@@ -439,7 +440,7 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
         
         adresseJointure = self.creerCouche(feats, "Point", sourceAdresse)
 
-        nomFichier = 'D:/omran/Runeo/data/adresse2.shp'
+        nomFichier = 'D:/omran/Runeo/data/adresse3.shp'
 
         if os.path.exists(nomFichier):
             os.remove(nomFichier)
@@ -469,6 +470,7 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
 
         sensRue = {}
         seuilPente = 2
+        parcParite = []
 
         spIndexCanal = QgsSpatialIndex()
         feat = QgsFeature()
@@ -564,12 +566,13 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
 
                     coucheAutre = self.creerCouche(autre, "Polygon", parcelle)
                         
+                    # Sélection des parcelles touchant la route parmis celles qui touchent la parcelle adresse
                     params =  {"INPUT": coucheAutre, "PREDICATE": [4], "INTERSECT": coucheRoute, "METHOD": 1}
                     processing.run("qgis:selectbylocation", params)
 
                     for parc in coucheAutre.getSelectedFeatures():
 
-                        # Sélection de la parcelle qui touche la route et qui touche la parcelle avec le point adresse 
+                        # Sélection d'une' parcelle qui touche la route et qui touche la parcelle avec le point adresse 
                         params = {"INPUT": parcelle, "FIELD": "id", "VALUE": parc['id']}
                         processing.run("qgis:selectbyattribute", params)
                         p2 = QgsFeature()
@@ -623,6 +626,8 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
 
                                 parcelle.commitChanges()
 
+                                parcParite.append(parc)
+
                                 change = True
                                 num = s['Num']
                                 s = QgsFeature(adresseJointure.fields())
@@ -631,6 +636,48 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
                                 s.setGeometry(QgsGeometry.fromPointXY(newPoint))
                 if not change:
                     nouveauS = False
+
+            # attribution de la parité sur l'autre côté de la route
+            params =  {"INPUT": parcelle, "PREDICATE": [0], "INTERSECT": batiment, "METHOD": 0}
+            processing.run("qgis:selectbylocation", params)
+
+            parcelleBat = self.creerCouche(parcelle.getSelectedFeatures(), "Polygon", parcelle)
+
+            params =  {"INPUT": parcelleBat, "PREDICATE": [0], "INTERSECT": coucheRoute, "METHOD": 1}
+            processing.run("qgis:selectbylocation", params)
+
+            parcelleBatRoute = self.creerCouche(parcelleBat.getSelectedFeatures(), "Polygon", parcelle)
+
+            parcPariteCouche = self.creerCouche(parcParite, "Polygon", parcelle)
+
+            params =  {"INPUT": parcelleBatRoute, "PREDICATE": [2], "INTERSECT": parcPariteCouche, "METHOD": 0}#####
+            processing.run("qgis:selectbylocation", params)
+
+            feedback.pushInfo("______parcelleBat.selectedFeatureCount: "+str(parcelleBatRoute.featureCount()))
+            feedback.pushInfo("______parcPariteCouche.featureCount: "+str(parcPariteCouche.featureCount()))
+            feedback.pushInfo("______parcelleBatRoute.selectedFeatureCount: "+str(parcelleBatRoute.selectedFeatureCount()))
+
+            for parc in parcelleBatRoute.getSelectedFeatures():
+
+                feedback.pushInfo("______parité autre coté route")
+
+                # Sélection d'une parcelle qui touche la route et qui ne touche pas la parcelle avec le point adresse 
+                params = {"INPUT": parcelle, "FIELD": "id", "VALUE": parc['id']}
+                processing.run("qgis:selectbyattribute", params)
+                p2 = QgsFeature()
+                parcelle.getSelectedFeatures().nextFeature(p2)
+
+                parcelle.startEditing()
+
+                sensRue[p["id"]] = int((s["Num"]+1)%2)
+                parcelle.changeAttributeValue(p2.id(), 8, int((s["Num"]+1)%2))
+
+                parcelle.commitChanges()
+
+                parcParite.append(parc)
+
+
+
     
         adresseJointure.invertSelection()
         
