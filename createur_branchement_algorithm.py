@@ -31,7 +31,10 @@ __copyright__ = '(C) 2022 by Runeo'
 __revision__ = '$Format:%H$'
 
 from asyncio.windows_events import NULL
+from cmath import inf
+from distutils import ccompiler
 from email import feedparser
+from email.charset import add_alias
 import os
 from math import sqrt
 from datetime import datetime
@@ -60,13 +63,10 @@ from qgis.core import (QgsProcessing,
                        QgsFeatureSink,
                        QgsSpatialIndex,
                        QgsFeatureRequest,
-                       QgsExpression,
                        QgsCoordinateReferenceSystem,
                        QgsVectorFileWriter,
-                       QgsLineString,
                        QgsPoint,
-                       QgsCoordinateTransformContext,
-                       QgsPolygon)
+                       QgsLineString)
 from processing.core.Processing import Processing
 Processing.initialize()
 from processing.tools import *
@@ -97,6 +97,7 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
     CANALISATION = 'CANALISATION'
     BRANCHEMENT = 'BRANCHEMENT'
     POINTDESSERTE = 'POINTDESSERTE'
+
 
     def actualiserProgress(self, feedback, avancementAlgo, points, message):
         avancementAlgo += points
@@ -146,22 +147,62 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
         return branchements, idBranchement
 
     def creerCouche(self, features, type, source):
+        feats = [feat for feat in features]
         if isinstance(source, QgsVectorLayer):
             attributs = source.dataProvider().fields().toList()
         elif isinstance(source, QgsFields):
             attributs = source.toList()
         else:
             attributs = source.fields().toList()
-        couche = QgsVectorLayer(type+"?crs=epsg:2975", "duplicated_layer", "memory")
-        couche.dataProvider().addAttributes(attributs)
-        couche.updateFields()
-        feats = [feat for feat in features]
-        couche.dataProvider().addFeatures(feats)
-        return couche
+        
+        c = QgsVectorLayer(type+"?crs=epsg:2975", "duplicated_layer", "memory")
+        try:
+            c.dataProvider().addAttributes(attributs)
+        except:
+            c = QgsVectorLayer(type+"?crs=epsg:2975", "duplicated_layer", "memory")
+            c.dataProvider().addAttributes(attributs)
+        c.updateFields()
+        
+        c.dataProvider().addFeatures(feats)
+        return c
+
+    def afficherCouche(self, context, couche, nomCouche):
+            context.temporaryLayerStore().addMapLayer(couche)
+            context.addLayerToLoadOnCompletion(couche.id(), QgsProcessingContext.LayerDetails(nomCouche, context.project(), 'nomCouche'))
+
 
     @staticmethod
     def calculerDistanceEucl(p1, p2):
         return math.sqrt((p1.x()-p2.x())**2+(p1.y()-p2.y())**2)
+
+    @staticmethod
+    def calculerCoords(x, y, a, d, signe):
+        b = y - a*x
+        aa = (a**2+1)
+        bb = (2*a*b - 2*a*y-2*x)
+        cc = (x**2+y**2+b**2-2*b*y-d**2)
+        discriminant = bb**2-4*aa*cc
+        if discriminant < 0:
+            discriminant = -discriminant
+        if signe == 0:
+            x21 = (-bb-sqrt(discriminant))/(2*aa)
+            x22 = (-bb+sqrt(discriminant))/(2*aa)
+            return x21, x22, b
+        else:
+            x2 = (-bb+signe*sqrt(discriminant))/(2*aa)
+            return x2, b
+
+    @staticmethod
+    def trouverSigne(a, b, x1, x2, routeEntiere):
+        if QgsGeometry.fromPointXY(QgsPointXY(x1, a*x1 + b)).intersects(routeEntiere.geometry()):
+            x = x1
+            signe = -1
+        elif QgsGeometry.fromPointXY(QgsPointXY(x2, a*x2 + b)).intersects(routeEntiere.geometry()):
+            x = x2
+            signe = 1
+        return x, signe
+
+
 
     def initAlgorithm(self, config):
         """
@@ -302,8 +343,7 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
                 
         for nomCouche in listeCoucheParcel:
             couche = QgsVectorLayer(file+nomCouche+".SHP", nomCouche, 'ogr')
-            context.temporaryLayerStore().addMapLayer(couche)
-            context.addLayerToLoadOnCompletion(couche.id(), QgsProcessingContext.LayerDetails('Couche', context.project(), 'Couche'))
+            self.afficherCouche(context, couche, 'Couche')
             #groupe.insertChildNode(0, QgsLayerTreeLayer(couche))
             #groupe.addLayer(couche)
             if nomCouche == "COMMUNE":
@@ -313,9 +353,7 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
                 commune = self.creerCouche(couche.getFeatures(), "Polygon", couche)
 
                 context.temporaryLayerStore().removeMapLayers([couche])
-
-                context.temporaryLayerStore().addMapLayer(commune)
-                context.addLayerToLoadOnCompletion(commune.id(), QgsProcessingContext.LayerDetails('COMMUNE', context.project(), 'COMMUNE'))
+                self.afficherCouche(context, commune, 'COMMUNE')
 
                 # Suppression des communes inutiles
                 ids = []
@@ -336,9 +374,7 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
                 parcelle.updateFields()
 
                 context.temporaryLayerStore().removeMapLayers([couche])
-
-                context.temporaryLayerStore().addMapLayer(parcelle)
-                context.addLayerToLoadOnCompletion(parcelle.id(), QgsProcessingContext.LayerDetails('PARCELLE', context.project(), 'PARCELLE'))
+                self.afficherCouche(context, parcelle, 'PARCELLE')
                 
                 # Suppression des parcelles qui ne sont pas dans les communes de la zone
                 ids = []
@@ -355,9 +391,7 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
                 batiment = self.creerCouche(couche.getFeatures(), "Polygon", couche)
 
                 context.temporaryLayerStore().removeMapLayers([couche])
-
-                context.temporaryLayerStore().addMapLayer(batiment)
-                context.addLayerToLoadOnCompletion(batiment.id(), QgsProcessingContext.LayerDetails('BATIMENT', context.project(), 'BATIMENT'))
+                self.afficherCouche(context, batiment, 'BATIMENT')
 
         avancementAlgo = self.actualiserProgress(feedback, avancementAlgo, 2, "Suppression des bâtiments hors-zones...")
 
@@ -412,10 +446,7 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
         
         route.dataProvider().deleteFeatures(aSupprimer)
 
-        #context.temporaryLayerStore().removeMapLayers([route])
-
-        context.temporaryLayerStore().addMapLayer(route)
-        context.addLayerToLoadOnCompletion(route.id(), QgsProcessingContext.LayerDetails('ROUTE', context.project(), 'ROUTE'))
+        self.afficherCouche(context, route, 'ROUTE')
 
         pointsDesserte = []
         pointsRestants = []
@@ -425,23 +456,27 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
         adresse = self.creerCouche(feats, "Point", sourceAdresse)
 
         pointsDouble = []
+        latDejaChercher = []
 
         # Recherche de points double
         for adr in adresse.getFeatures():
-            params = {"INPUT": adresse, "FIELD": "Latitude", "VALUE": adr['Latitude']}
-            processing.run("qgis:selectbyattribute", params)
+            if adr['Latitude'] not in latDejaChercher:
+                latDejaChercher.append(adr['Latitude'])
+                
+                params = {"INPUT": adresse, "FIELD": "Latitude", "VALUE": adr['Latitude']}
+                processing.run("qgis:selectbyattribute", params)
 
-            if adresse.selectedFeatureCount() > 1:
-                pointsDouble.append([])
-                for adrDouble in adresse.getSelectedFeatures():
-                    pointsDouble[len(pointsDouble)-1].append(adrDouble['fid'])
-                pointsDouble[len(pointsDouble)-1].append(0)
+                if adresse.selectedFeatureCount() > 1:
+                    liste = []
+                    for adrDouble in adresse.getSelectedFeatures():
+                        liste.append(adrDouble['fid'])
+                    pointsDouble.append(liste)
 
         avancementAlgo = self.actualiserProgress(feedback, avancementAlgo, 2, "jointure de la couche d'adresses et de la couche des parcelles...")
         
         adresseJointure = self.creerCouche(feats, "Point", sourceAdresse)
 
-        nomFichier = 'D:/omran/Runeo/data/adresse6.shp'
+        nomFichier = 'D:/omran/Runeo/data/adresse5.shp'###supprimer a la fin
 
         if os.path.exists(nomFichier):
             os.remove(nomFichier)
@@ -456,7 +491,7 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
 
         avancementAlgo = self.actualiserProgress(feedback, avancementAlgo, 2, "Sélection des parcelles qui ont un bâtiment...")
 
-        # les parcelles sur lesquelles se trouvent un bâtiment son tsélectionnées
+        # les parcelles sur lesquelles se trouvent un bâtiment son sélectionnées
         params =  {"INPUT": parcelle, "PREDICATE": [0], "INTERSECT": batiment, "METHOD": 0}
         processing.run("qgis:selectbylocation", params)
 
@@ -526,7 +561,8 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
                                 num = int(s["Num"]%2)
                         else:
                             num = int(s["Num"]%2)
-                        parcelle.changeAttributeValue(p.id(), 8, num)
+                        indexColonneParite = parcelle.fields().indexFromName('parite')
+                        parcelle.changeAttributeValue(p.id(), indexColonneParite, num)
                         parcelle.commitChanges()
 
                         parcParite.append(p)
@@ -553,11 +589,12 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
 
                     autre = []
 
-                    routeParc = 0
+                    routeParc = False
+                    estChemin = False
+
 
                     # On différencie la route des parcelles avec bâtiment
                     for parc in parcelle.getSelectedFeatures():
-                        feedback.pushInfo("______"+str(parc["id"]))
                         # Création de la couche contenant uniquement une parcelle qui touche la parcelle possédant une adresse
                         parcToucheCouche = self.creerCouche([parc], "Polygon", parcelle)
                         
@@ -570,146 +607,143 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
                             autre.append(parc)
                         else: # Cas des parcelles sans bâtiment
                             if parc.geometry().intersects(canalisationProche.geometry()): # cas de la route -> intersection avec la canalisation
-                                routeParc = 1
+                                routeParc = True
+                                estChemin = True
                                 prFeat = parc
                             else: # Cas des parcelle qui n'ont pas des bâtiments mais ne sont pas des routes
                                 autre.append(parc)
-                        #
-                        if not routeParc:
-                            routeParc = 1
-                            routeEntiere = QgsFeature(parcelleData.fields())
-                            route.getFeatures().nextFeature(routeEntiere)
-                            idRoute = routeEntiere.id()
-                            ###routeParc
-                            pc1 = canalisationProche.geometry().asPolyline()[0]
-                            xc1, yc1 = pc1[0], pc1[1]
-                            pc2 = canalisationProche.geometry().asPolyline()[1]###pas 1 mais le dernier element (len(...))
-                            xc2, yc2 = pc2[0], pc2[1]
+                        
+                    if not routeParc:
+
+                        routeEntiere = QgsFeature(parcelleData.fields())
+                        route.getFeatures().nextFeature(routeEntiere)
+                        idRoute = routeEntiere.id()
+
+                        if canalisationProche.geometry().intersects(routeEntiere.geometry()):# Cas où la canalisation n'intersecte pas la route
+                            routeParc = True
                             
-                            #indexSpatialRoute = QgsSpatialIndex(route.getFeatures(), flags=QgsSpatialIndex.FlagStoreFeatureGeometries)
-                            fitRoute = route.getFeatures(QgsFeatureRequest().setFilterFid(idRoute))
-                            caracRoute = QgsFeature()
-                            fitRoute.nextFeature(caracRoute)
-                            pointSurRoute1 = caracRoute.geometry().closestSegmentWithContext(QgsPointXY(xc1, yc1))[1]
-                            pointSurRoute2 = caracRoute.geometry().closestSegmentWithContext(QgsPointXY(xc2, yc2))[1]
+                        pc1 = canalisationProche.geometry().asPolyline()[0]
+                        xc1, yc1 = pc1[0], pc1[1]
+                        pc2 = canalisationProche.geometry().asPolyline()[len(canalisationProche.geometry().asPolyline())-1]
+                        xc2, yc2 = pc2[0], pc2[1]
                             
-                            penteRoute = (yc2 - yc1)/(xc2 - xc1)
-                            a = -1/penteRoute # pente perdendiculaire
-                            b = pointSurRoute1[1] - a*pointSurRoute1[0]
-                            d = 0.1
-                            x1, y1 = pointSurRoute1[0], pointSurRoute1[1]
-                            x2, y2 = 0, 0
-                            #######enlever systeme haut bas et faire un test avec chaque coords, reduire d a plus petit lorsque test trouve rien, (peut etre si ca prend pas trop de temps de calcul tracer le polygone par itération pour l'entourer completement puis faire intersect)                            
-                            #######probleme dans l'equation
-                            A = (a**2+1)
-                            B = (2*a*b - 2*a*y1-2*x1)
-                            C = (x1**2+y1**2+b**2-2*b*y1-d**2)
-                            discriminant = B**2-4*A*C
-                            if discriminant > 0:
-                                x21 = (-B-sqrt(discriminant))/(2*A)
-                                x22 = (-B+sqrt(discriminant))/(2*A)
-                                if QgsGeometry.fromPointXY(QgsPointXY(x21, a*x21 + b)).intersects(routeEntiere.geometry()):
-                                    x2 = x21
-                                    signe = 1
-                                elif QgsGeometry.fromPointXY(QgsPointXY(x22, a*x22 + b)).intersects(routeEntiere.geometry()):
-                                    x2 = x22
-                                    signe = -1
-                                else:
-                                    d = d/2
-                                    # recommencer
-                            else:
-                                feedback.pushInfo("______probleme")
+                        #indexSpatialRoute = QgsSpatialIndex(route.getFeatures(), flags=QgsSpatialIndex.FlagStoreFeatureGeometries)
+                        fitRoute = route.getFeatures(QgsFeatureRequest().setFilterFid(idRoute))
+                        caracRoute = QgsFeature()
+                        fitRoute.nextFeature(caracRoute)
+                        pointSurRoute1 = caracRoute.geometry().closestSegmentWithContext(QgsPointXY(xc1, yc1))[1]
+                        pointSurRoute2 = caracRoute.geometry().closestSegmentWithContext(QgsPointXY(xc2, yc2))[1]
+                            
+                        x1, y1 = pointSurRoute1[0], pointSurRoute1[1]
+                        x2, y2 = 0, 0
+                        x3, y3 = pointSurRoute2[0], pointSurRoute2[1]
+                        x4, y4 = 0, 0
+
+                        # Calcul de la pente de la canalisation, on pourrait aussi prendre celle de la route
+                        if xc2 != xc1:
+                            penteCanal = (yc2 - yc1)/(xc2 - xc1)
+                        else:
+                            penteCanal = inf
+
+                        iter1, iter2 = 0, 0
+
+                        if yc2 != yc1:
+                            a = -1/penteCanal # pente perdendiculaire à la pente de la route
+                        else:
+                            a = inf
+
+                        x21, x22, b = CreateurBranchementAlgorithm.calculerCoords(x1, y1, a, 0.1, 0)
+                        
+                        x2, signe1 = CreateurBranchementAlgorithm.trouverSigne(a, b, x21, x22, routeEntiere)
+                        y2 = a*x2 + b
+                        
+                        d = 0.1
+                        # On s'arrète lorsque le point est "sorti" de la route
+                        while QgsGeometry.fromPointXY(QgsPointXY(x2, y2)).intersects(routeEntiere.geometry()):##
+                            d += 1
+                            iter1 = d
+                            x2, b = CreateurBranchementAlgorithm.calculerCoords(x1, y1, a, d, signe1)
                             y2 = a*x2 + b
+                        
+                        x41, x42, b = CreateurBranchementAlgorithm.calculerCoords(x3, y3, a, 0.1, 0)
+                        
+                        x4, signe2 = CreateurBranchementAlgorithm.trouverSigne(a, b, x41, x42, routeEntiere)
+                        y4 = a*x4 + b
                             
-                            while QgsGeometry.fromPointXY(QgsPointXY(x2, y2)).intersects(routeEntiere.geometry()):##
-                                d += 1
-                                A = (a**2+1)
-                                B = (2*a*b - 2*a*y1-2*x1)
-                                C = (x1**2+y1**2+b**2-2*b*y1-d**2)
-                                discriminant = B**2-4*A*C
-                                if discriminant > 0:
-                                    x2 = (-B+signe*sqrt(discriminant))/(2*A)
-                                else:
-                                    feedback.pushInfo("______probleme")
-                                y2 = a*x2 + b
-                            
-                            b = pointSurRoute2[1] - a*pointSurRoute2[0]
-                            d = 0.1
-                            x3, y3 = pointSurRoute2[0], pointSurRoute2[1]
-                            x4, y4 = 0, 0
-                            A = (a**2+1)
-                            B = (2*a*b - 2*a*y3-2*x3)
-                            C = (x3**2+y3**2+b**2-2*b*y3-d**2)
-                            discriminant = B**2-4*A*C
-                            if discriminant > 0:
-                                x41 = (-B-sqrt(discriminant))/(2*A)
-                                x42 = (-B+sqrt(discriminant))/(2*A)
-                                if QgsGeometry.fromPointXY(QgsPointXY(x41, a*x41 + b)).intersects(routeEntiere.geometry()):
-                                    x4 = x41
-                                    signe = -1
-                                elif QgsGeometry.fromPointXY(QgsPointXY(x42, a*x42 + b)).intersects(routeEntiere.geometry()):
-                                    x4 = x42
-                                    signe = 1
-                                else:
-                                    d = d/2
-                            else:
-                                feedback.pushInfo("______probleme")
+                        d = 0.1
+                        # On s'arrète lorsque le point est "sorti" de la route
+                        while QgsGeometry.fromPointXY(QgsPointXY(x4, y4)).intersects(routeEntiere.geometry()):##
+                            d += 1
+                            iter2 = d
+                            x4, b = CreateurBranchementAlgorithm.calculerCoords(x3, y3, a, d, signe2)
                             y4 = a*x4 + b
-                            
-                            while QgsGeometry.fromPointXY(QgsPointXY(x4, y4)).intersects(routeEntiere.geometry()):##
-                                d += 1
-                                A = (a**2+1)
-                                B = (2*a*b - 2*a*y3-2*x3)
-                                C = (x3**2+y3**2+b**2-2*b*y3-d**2)
-                                discriminant = B**2-4*A*C
-                                if discriminant > 0:
-                                    x41 = (-B+signe*sqrt(discriminant))/(2*A)
-                                else:
-                                    feedback.pushInfo("______probleme")
+
+                        # Mieux vaut trop gros que pas assez
+                        if abs(iter1 - iter2) > 5:
+                            if iter1 < iter2:
+                                iter2 = iter1
+                                x4, b = CreateurBranchementAlgorithm.calculerCoords(x3, y3, a, iter2, signe2)
                                 y4 = a*x4 + b
+                            else:
+                                iter1 = iter2
+                                x2, b = CreateurBranchementAlgorithm.calculerCoords(x1, y1, a, iter1, signe1)
+                                y2 = a*x2 + b
 
-                            feedback.pushInfo("_____x1: "+str(x1))
-                            feedback.pushInfo("_____x2: "+str(x2))
-                            feedback.pushInfo("_____x3: "+str(x3))
-                            feedback.pushInfo("_____x4: "+str(x4))
+                        # Cas où les lignes se croisent
+                        if QgsGeometry.fromPolyline(QgsLineString(QgsPoint(x1, y1), QgsPoint(x3, y3))).intersects(QgsGeometry.fromPolyline(QgsLineString(QgsPoint(x2, y2), QgsPoint(x4, y4)))):
+                            xInterm, yInterm = x3, y3
+                            x3, y3 = x4, y4
+                            x4, y4 = xInterm, yInterm
 
-                            t1, t2, t3, t4 = QgsFeature(pointDesserteFields), QgsFeature(pointDesserteFields), QgsFeature(pointDesserteFields), QgsFeature(pointDesserteFields)
-                            t1.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(x1, y1)))
-                            t2.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(x2, y2)))
-                            t3.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(x3, y3)))
-                            t4.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(x4, y4)))
-                            test = self.creerCouche([t1, t2, t3, t4], "Point", pointDesserteFields)
-                            context.temporaryLayerStore().addMapLayer(test)
-                            context.addLayerToLoadOnCompletion(test.id(), QgsProcessingContext.LayerDetails('test', context.project(), 'test'))
-                            
-                            portionRoute = QgsVectorLayer('Polygon?crs=epsg:2875', "duplicated_layer", "memory")
-                            prFeat = QgsFeature()
-                            prFeatData = portionRoute.dataProvider()
-                            prFeatData.addAttributes(route.dataProvider().fields().toList())
-                            portionRoute.updateFields()
-                            points = [QgsPointXY(x1, y1), QgsPointXY(x2, y2), QgsPointXY(x4, y4), QgsPointXY(x3, y3), QgsPointXY(x1, y1)]
-                            prFeat.setGeometry(QgsGeometry.fromPolygonXY([points]))
-                            prFeatData.addFeatures([prFeat])
+                        # On agrandit un peu les bords du polygone
+                        newx1, b = CreateurBranchementAlgorithm.calculerCoords(x1, y1, a, 1, -signe1)
+                        newy1 = a*x1 + b
 
-                            #context.temporaryLayerStore().addMapLayer(portionRoute)
-                            #context.addLayerToLoadOnCompletion(portionRoute.id(), QgsProcessingContext.LayerDetails('portionRoute', context.project(), 'portionRoute'))
-                            
-                            if not canalisationProche.geometry().intersects(routeEntiere.geometry()):# Cas où la canalisation n'intersecte pas la route
-                                routeParc = 0
-                        #
+                        newx3, b = CreateurBranchementAlgorithm.calculerCoords(x3, y3, a, 1, -signe2)
+                        newy3 = a*x3 + b
+
+                        points = [QgsPointXY(x1, y1), QgsPointXY(x2, y2), QgsPointXY(x4, y4), QgsPointXY(x3, y3), QgsPointXY(x1, y1)]                                
+                        points2 = [QgsPointXY(newx1, newy1), QgsPointXY(x2, y2), QgsPointXY(x4, y4), QgsPointXY(x3, y3), QgsPointXY(x1, y1)]                                
+                        points3 = [QgsPointXY(x1, y1), QgsPointXY(x2, y2), QgsPointXY(x4, y4), QgsPointXY(newx3, newy3), QgsPointXY(x1, y1)]                                
+
+                        geom = QgsGeometry.fromPolygonXY([points])
+                        geom2 = QgsGeometry.fromPolygonXY([points2])
+                        geom3 = QgsGeometry.fromPolygonXY([points3])
+
+                        if geom2.area() < geom.area():
+                            newx1, b = CreateurBranchementAlgorithm.calculerCoords(x1, y1, a, 1, signe1)
+                            newy1 = a*x1 + b
+                        if geom3.area() < geom.area():
+                            newx3, b = CreateurBranchementAlgorithm.calculerCoords(x3, y3, a, 1, signe2)
+                            newy3 = a*x3 + b
+                        
+                        x1, y1, x3, y3 = newx1, newy1, newx3, newy3
+                        points = [QgsPointXY(x1, y1), QgsPointXY(x2, y2), QgsPointXY(x4, y4), QgsPointXY(x3, y3), QgsPointXY(x1, y1)]                                
+                        geom = QgsGeometry.fromPolygonXY([points])
+
+                        prFeat = QgsFeature()
+                        prFeat.setGeometry(geom)
+                        portionRoute = self.creerCouche([prFeat], 'Polygon', route)
 
                     if routeParc:
 
                         coucheRoute = self.creerCouche([prFeat], "Polygon", parcelle)
 
                         coucheAutre = self.creerCouche(autre, "Polygon", parcelle)
+
+                        if not estChemin:
+                        
+                            params =  {"INPUT": coucheRoute, "OVERLAY": route, "OUTPUT": QgsProcessing.TEMPORARY_OUTPUT}
+                            coucheRoute = processing.run("qgis:clip", params)['OUTPUT']
                             
+                            #context.temporaryLayerStore().addMapLayer(coucheRoute)
+                            #context.addLayerToLoadOnCompletion(coucheRoute.id(), QgsProcessingContext.LayerDetails('portionRoute', context.project(), 'portionRoute'))
+                        
                         # Sélection des parcelles touchant la route parmis celles qui touchent la parcelle adresse
                         params =  {"INPUT": coucheAutre, "PREDICATE": [4], "INTERSECT": coucheRoute, "METHOD": 0}
                         processing.run("qgis:selectbylocation", params) 
 
-                        for parc in coucheAutre.getSelectedFeatures():
-
+                        for parc in coucheAutre.getSelectedFeatures():                            
                             # Sélection d'une parcelle qui touche la route et qui touche la parcelle avec le point adresse 
                             params = {"INPUT": parcelle, "FIELD": "id", "VALUE": parc['id']}
                             processing.run("qgis:selectbyattribute", params)
@@ -743,15 +777,15 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
                                 if x1 != x2:
                                     penteCanal = (y2 - y1)/(x2 - x1)
                                 else:
-                                    penteCanal = 1
+                                    penteCanal = inf
                                 if newX != x0:
                                     penteParc = (newY - y0)/(newX - x0)
                                 else:
-                                    penteParc = 1
+                                    penteParc = inf
 
-                                if abs(penteCanal - penteParc) < seuilPente: # comparaison des pentes de la canalisation et des parcelles
+                                # comparaison des pentes de la canalisation et des parcelles
+                                if abs(penteCanal - penteParc) < seuilPente: 
 
-                                    feedback.pushInfo("_____parité ecrite:")
                                     aCreer = False
 
                                     parcelle.startEditing()
@@ -765,7 +799,8 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
                                         num = int(s["Num"]%2)
 
                                     sensRue[p["id"]] = num
-                                    parcelle.changeAttributeValue(p2.id(), 8, num)
+                                    indexColonneParite = parcelle.fields().indexFromName('parite')
+                                    parcelle.changeAttributeValue(p2.id(), indexColonneParite, num)
 
                                     parcelle.commitChanges()
 
@@ -781,63 +816,56 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
 
                     if not change:
                         nouveauS = False
-            
-        # Attribution de la parité sur l'autre côté de la route
+                    
+                # Attribution de la parité sur l'autre côté de la route
 
-        # Sélection des parcelles qui touchent la route
-        params =  {"INPUT": parcelle, "PREDICATE": [0], "INTERSECT": coucheRoute, "METHOD": 0}
-        processing.run("qgis:selectbylocation", params)
-        
-        # Déselection de la parcelle route
-        params =  {"INPUT": parcelle, "PREDICATE": [3], "INTERSECT": coucheRoute, "METHOD": 3}
-        processing.run("qgis:selectbylocation", params)
+                # Sélection des parcelles qui touchent la route
+                params =  {"INPUT": parcelle, "PREDICATE": [0], "INTERSECT": coucheRoute, "METHOD": 0}
+                processing.run("qgis:selectbylocation", params)
 
-        parcelleRoute = self.creerCouche(parcelle.getSelectedFeatures(), "Polygon", parcelle)
+                    
+                # Déselection de la parcelle route
+                params =  {"INPUT": parcelle, "PREDICATE": [3], "INTERSECT": coucheRoute, "METHOD": 3}
+                processing.run("qgis:selectbylocation", params)
 
-        parcPariteCouche = self.creerCouche(parcParite, "Polygon", parcelle)
+                parcelleRoute = self.creerCouche(parcelle.getSelectedFeatures(), "Polygon", parcelle)
 
-        # Sélection des parcelles qui touchent la route avec parité
-        params =  {"INPUT":parcelleRoute, "PREDICATE": [3], "INTERSECT": parcPariteCouche, "METHOD": 0}
-        processing.run("qgis:selectbylocation", params)
-        c = QgsFeature()
-        feedback.pushInfo("_______nombre de parcelles avec parité: "+str(parcPariteCouche.featureCount()))
-        feedback.pushInfo("_______nombre de parcelles qui touchent la route: "+str(parcelleRoute.featureCount()))
-        feedback.pushInfo("_______nombre de parcelles qui touchent la route avec parité: "+str(parcelleRoute.selectedFeatureCount()))
-        
-        for f in parcelleRoute.getSelectedFeatures():
-            if f['parite'] != 0 or f['parite'] != 1:
-                parcelle.deselect(f.id())
+                parcPariteCouche = self.creerCouche(parcParite, "Polygon", parcelle)
 
-        if parcelleRoute.getSelectedFeatures().nextFeature(c):
-            parite = c['parite']
-        else:
-            parite = 2
-### "c" est parfois surmetn un mauvais feature, voir a la creation, il faut qu'il ess bine le champ parité
+                # Sélection des parcelles qui touchent la route avec parité
+                params =  {"INPUT":parcelleRoute, "PREDICATE": [3], "INTERSECT": parcPariteCouche, "METHOD": 0}
+                processing.run("qgis:selectbylocation", params)
+                c = QgsFeature()
+                    
+                # Si la sélection n'est pas vide
+                if parcelleRoute.selectedFeatureCount():
 
-        parcelleRoute.select([f.id() for f in parcelleRoute.getFeatures()]) # Sélection de tous les éléments
-        # Sélection des parcelles qui touchent la route mais pas les parcelles avec parité
-        params =  {"INPUT": parcelleRoute, "PREDICATE": [3], "INTERSECT": parcPariteCouche, "METHOD": 3}
-        processing.run("qgis:selectbylocation", params)
+                    parcelleRoute.getSelectedFeatures().nextFeature(c)
+                    parite = c['parite']
 
-        for parc in parcelleRoute.getSelectedFeatures():
+                    parcelleRoute.select([f.id() for f in parcelleRoute.getFeatures()]) # Sélection de tous les éléments
+                    # Sélection des parcelles qui touchent la route mais pas les parcelles avec parité
+                    params =  {"INPUT": parcelleRoute, "PREDICATE": [3], "INTERSECT": parcPariteCouche, "METHOD": 3}
+                    processing.run("qgis:selectbylocation", params)
 
-            feedback.pushInfo("______parité autre coté route")
+                    for parc in parcelleRoute.getSelectedFeatures():
 
-            # Sélection d'une parcelle qui touche la route et qui ne touche pas la parcelle avec le point adresse 
-            params = {"INPUT": parcelle, "FIELD": "id", "VALUE": parc['id']}
-            processing.run("qgis:selectbyattribute", params)
-            p2 = QgsFeature()
-            parcelle.getSelectedFeatures().nextFeature(p2)
+                        # Sélection d'une parcelle qui touche la route et qui ne touche pas la parcelle avec le point adresse 
+                        params = {"INPUT": parcelle, "FIELD": "id", "VALUE": parc['id']}
+                        processing.run("qgis:selectbyattribute", params)
+                        p2 = QgsFeature()
+                        parcelle.getSelectedFeatures().nextFeature(p2)
 
-            parcelle.startEditing()
+                        parcelle.startEditing()
 
-            sensRue[p2["id"]] = int((parite+1)%2)
-            parcelle.changeAttributeValue(p2.id(), 8, int((parite+1)%2))
+                        sensRue[p2["id"]] = int((parite+1)%2)
+                        indexColonneParite = parcelle.fields().indexFromName('parite')
+                        parcelle.changeAttributeValue(p2.id(), 8, int((parite+1)%2))
 
-            parcelle.commitChanges()
+                        parcelle.commitChanges()
 
-            parcParite.append(p2)
-    
+                        parcParite.append(p2)
+                    
         adresseJointure.invertSelection()
         
         # Création des points restants pour les points adresse qui ne sont pas dans des parcelles avec bâtiment
@@ -931,13 +959,16 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
 
             nbPoints = 0
             listePoint = []
-            indexListe = 0
+            n = 0
 
-            for n, liste in enumerate(pointsDouble):
+            for liste in pointsDouble:
                 if point['adresse_id'] in liste:
                     listePoint = liste
-                    indexListe = n
-                    nbPoints = len(liste)-1
+                    for i, valeur in enumerate(listePoint):
+                        if point['adresse_id'] == valeur:
+                            n = i
+                    nbPoints = len(liste)
+                    
             """
             try:
                 if CreateurBranchementAlgorithm.calculerDistanceEucl(p.geometry().asPoint(), p2.geometry().asPoint()) < 0.1: # les points sont au même endroit, la même adresse est donc dans le fichier client plusieurs fois, il y a plusieurs branchements sur la parcelle
@@ -951,7 +982,6 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
             modif = True
             while modif:
                 modif = False
-                feedback.pushInfo("_____on entre dans la boucle")
                 brFeat = QgsFeature(branchementFields)
                 brFeat.setGeometry(QgsGeometry.fromPolyline([QgsPoint(x1, y1), QgsPoint(x2, y2)]))
 
@@ -977,14 +1007,13 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
 
                 # Condition de non croisement des branchements
                 if coucheBranchement.selectedFeatureCount() > 0:
-                    feedback.pushInfo("_______"+str(coucheBranchement.selectedFeatureCount())+" branchements se croisent")
 
                     br = QgsFeature()
                     for feat in coucheBranchement.getSelectedFeatures():
                         br = feat
                     #coucheBranchement.getSelectedFeatures().nextFeature(br)
 
-                    processing.run("qgis:selectbyexpression", {'INPUT': adresse2, 'EXPRESSION': "\"parcelle_id\" = "+str(brFeat2.id()), 'METHOD': 0})
+                    processing.run("qgis:selectbyexpression", {'INPUT': adresse2, 'EXPRESSION': "\"parcelle_id\" = "+str(br.id()), 'METHOD': 0})
 
                     pt = QgsFeature()
                     for feat in adresse2.getSelectedFeatures():
@@ -992,7 +1021,6 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
                     #adresse2.getSelectedFeatures().nextFeature(pt)
 
                     if br.geometry().length() < brFeat.geometry().length() and brFeat.geometry().length()<100:
-                        feedback.pushInfo("______on garde l'ancien")
                         modif = True
                         jp += 1
                         plusProcheIdParcelle = indexSpatialParcelle.nearestNeighbor(point.geometry(), jp+1)[jp]
@@ -1013,30 +1041,25 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
                         params =  {"INPUT": coucheBranchement, "PREDICATE": [0], "INTERSECT": coucheBranchementPossible, "METHOD": 0}
                         processing.run("qgis:selectbylocation", params)
                     elif adresse2.selectedFeatureCount() > 1:
-                        feedback.pushInfo("_____on garde le nouveau")
+                        #feedback.pushInfo("______remove")
                         for elt in nouveauxPointsDesserte: ### creer fct de delete
                             if elt['id'] == pt['id']:
-                                feedback.pushInfo("____delete")
                                 nouveauxPointsDesserte.remove(elt)
                                 pointsRestants.append(elt)
                         for elt in pointsDesserte:
                             if elt['id'] == pt['id']:
-                                feedback.pushInfo("____delete")
                                 pointsDesserte.remove(elt)
                                 pointsRestants.append(elt)
                         for elt in branchements:
-                            if elt['id'] == brFeat2.id():
-                                nouveauxPointsDesserte.remove(elt)
-                        
-                    else:
-                        feedback.pushInfo("_____prob croisement")
-
-                feedback.pushInfo("______nb points deja dans parcelle: "+str(parcelleIds.count(parcId) + parcelleIdsNew.count(parcId)))
-                feedback.pushInfo("______nb adresse dans cette parcelle: "+str(nbPoints))
-                
+                            if elt['parcelle_id'] == br.id():
+                                #feedback.pushInfo("______remove branchement")
+                                branchements.remove(elt)
+                                        
                 # Condition d'unicité de point de desserte par parcelle
                 if parcelleIds.count(parcId) + parcelleIdsNew.count(parcId) != 0:
-                    if parcelleIds.count(parcId) + parcelleIdsNew.count(parcId) >= nbPoints:
+                    feedback.pushInfo("_____nb de point deja sur la parcelle "+ str(parcId) +": "+str(parcelleIds.count(parcId) + parcelleIdsNew.count(parcId)))
+                    feedback.pushInfo("______nb adresses: "+str(nbPoints))
+                    if parcelleIds.count(parcId) + parcelleIdsNew.count(parcId) > nbPoints:
                         
                         modif = True
                         if parcId in parcelleIdsNew: # cas où le point fait partie des points placés après
@@ -1054,7 +1077,6 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
                             
                             # On compare les longueurs des branchements, on considère que le plus petit est le bon
                             if br.geometry().length() < QgsGeometry.fromPolylineXY([QgsPointXY(x1, y1), QgsPointXY(x2, y2)]).length(): # cas où le branchement déjà présent est plus petit
-                                feedback.pushInfo("_____ancien plus petit")
                                 modif = True
                                 jp += 1
                                 
@@ -1069,19 +1091,15 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
                                 geometrie = QgsGeometry.fromPointXY(QgsPointXY(x2, y2))
 
                             else: # cas où le nouveau branchement est le plus petit
-                                feedback.pushInfo("_____nouveau plus petit")
-
                                 for elt in nouveauxPointsDesserte: ### creer fct de delete
                                     if elt['id'] == pt['id']:
-                                        feedback.pushInfo("____delete")
                                         nouveauxPointsDesserte.remove(elt)
                                         pointsRestants.append(elt)
                                 for elt in branchements:
                                     if elt['id'] == br['id']:
-                                        nouveauxPointsDesserte.remove(elt)
+                                        branchements.remove(elt)                                
 
                         elif parcId in parcelleIds: # cas où le point qui est sur la même parcelle où l'on souhaite placer notre nouveau point fait partie des points placés au début qui étaient déjà sur des parcelles habités
-                            feedback.pushInfo("____comme au debut")
                             modif = True
                             jp += 1
                         
@@ -1095,14 +1113,10 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
                             x2, y2 = feature.geometry().centroid().asPoint().x(), feature.geometry().centroid().asPoint().y()
                             geometrie = QgsGeometry.fromPointXY(QgsPointXY(x2, y2))
 
-                        else:
-                            feedback.pushInfo("_____0000000_____")
-
                         parite = caracParcelle2['parite']
                         # Vérification de la parité
                         if parite is not None and parite != point["Num"]%2:
                             modif = True
-                            feedback.pushInfo("____test parite")
                             jp += 1
                             plusProcheIdParcelle = indexSpatialParcelle.nearestNeighbor(point.geometry(), jp+1)[jp]
                             caracParcelle2, pointSurParcelle = self.trouverVoisinParcelle(point, plusProcheIdParcelle, parcelleData)
@@ -1115,28 +1129,23 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
                             geometrie = QgsGeometry.fromPointXY(QgsPointXY(x2, y2))
 
                     elif nbPoints > 0: # cas où plusieurs points sont superposés, il faut les décaler légèrement
-                        feedback.pushInfo("_______decalage")
-                        n = listePoint[len(listePoint)-1]
+                        #feedback.pushInfo("______decalage")
                         if n%2:
                             decalage = (math.ceil(n/2))/5
                         else:
                             decalage = -(n/2)/5
-                        pointsDouble[indexListe][len(listePoint)-1] += 1
-                        if decalage:
-                            w = (y2-y1)**2+(x2-x1)**2-(x2-x1-decalage)**2
-                            if w < 0:
-                                w = -w
-                            y2 = sqrt(w) + y1
-                            x2 -= decalage
-                            geometrie = QgsGeometry.fromPointXY(QgsPointXY(x2, y2))
-                else:
-                    feedback.pushInfo("_____0000000_____")
+                        w = (y2-y1)**2+(x2-x1)**2-(x2-x1-decalage)**2
+                        if w < 0:
+                            w = -w
+                        y2 = sqrt(w) + y1
+                        x2 -= decalage
+                        geometrie = QgsGeometry.fromPointXY(QgsPointXY(x2, y2))
+                        modif = False
                 
                 parite = caracParcelle2['parite']
                 # Condition de respect de la parité
-                if parite is not None and parite != point["Num"]%2:
-                    modif = True
-                    feedback.pushInfo("____test parite")
+                if parite is not None and parite != point["Num"]%2 and modif == True:
+                    #feedback.pushInfo("____parité")
                     jp += 1
                     plusProcheIdParcelle = indexSpatialParcelle.nearestNeighbor(point.geometry(), jp+1)[jp]
                     caracParcelle2, pointSurParcelle = self.trouverVoisinParcelle(point, plusProcheIdParcelle, parcelleData)
@@ -1148,9 +1157,7 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
                     x2, y2 = feature.geometry().centroid().asPoint().x(), feature.geometry().centroid().asPoint().y()
                     geometrie = QgsGeometry.fromPointXY(QgsPointXY(x2, y2))
 
-                feedback.pushInfo("_____modif: "+str(modif))
-
-            feedback.pushInfo(str(parcId))
+            #feedback.pushInfo("___"+str(parcId))
             pointDesserte.setGeometry(geometrie)
             pointDesserte.setAttributes([idPointDesserte, parcId, point['id'], caracCanalisation2['id'], point['Adresse complète'], point['Num'], date, 'C'])
             nouveauxPointsDesserte.append(pointDesserte)
