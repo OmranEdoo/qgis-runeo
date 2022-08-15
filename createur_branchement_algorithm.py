@@ -124,8 +124,10 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
         fitParcelle2 = parcelleData.getFeatures(QgsFeatureRequest().setFilterFid(plusProcheIdParcelle))
         caracParcelle2 = QgsFeature()
         fitParcelle2.nextFeature(caracParcelle2)
-
-        pointSurParcelle = caracParcelle2.geometry().closestSegmentWithContext(QgsPointXY(point.geometry().asPoint()))[1]
+        if isinstance(point, QgsPointXY):
+            pointSurParcelle = caracParcelle2.geometry().closestSegmentWithContext(point)[1]
+        else:
+            pointSurParcelle = caracParcelle2.geometry().closestSegmentWithContext(QgsPointXY(point.geometry().asPoint()))[1]
 
         return caracParcelle2, pointSurParcelle
 
@@ -135,7 +137,10 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
         caracCanalisation2 = QgsFeature()
         fitCanalisation2.nextFeature(caracCanalisation2)
 
-        pointSurCanalisation = caracCanalisation2.geometry().closestSegmentWithContext(QgsPointXY(point.geometry().asPoint()))[1]
+        if isinstance(point, QgsFeature):
+            pointSurCanalisation = caracCanalisation2.geometry().closestSegmentWithContext(QgsPointXY(point.geometry().asPoint()))[1]
+        else:
+            pointSurCanalisation = caracCanalisation2.geometry().closestSegmentWithContext(QgsPointXY(point))[1]
 
         return caracCanalisation2, pointSurCanalisation
 
@@ -931,7 +936,7 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
 
             seuilTailleBranchement = 10
             seuilJp = 5
-            seuilJc = 5
+            seuilJc = 20
             idsNumVoie = []
             parcelleIds = []
             pointsSansNum = []
@@ -976,6 +981,10 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
                     while difflib.SequenceMatcher(a=caracCanalisation2['rue'].lower(), b=point['NOM VOIE'].lower()).ratio() < 0.8 and jc < seuilJc:###mettre les deux champs en parametres
                         jc += 1
                         plusProcheIdCanalisation = indexSpatialCanalisation.nearestNeighbor(point.geometry().asPoint(), jc+1)[jc]
+                        caracCanalisation2, pointSurLigne = self.trouverVoisinCanalisation(point, plusProcheIdCanalisation, sourceCanalisation)
+                    
+                    if jc == 5:
+                        plusProcheIdCanalisation = indexSpatialCanalisation.nearestNeighbor(point.geometry().asPoint(), 1)[0]
                         caracCanalisation2, pointSurLigne = self.trouverVoisinCanalisation(point, plusProcheIdCanalisation, sourceCanalisation)
 
                     parcId = caracParcelle2.id()
@@ -1032,65 +1041,39 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
                         modifNumero = False
                         # Certains branchements ne satisferont aucune conditions sur toutes les parcelles, on limite donc raisonnablement le nombre d'itération maximum
                         if jp < seuilJp and jp < nombreCandidats:
-                            # Cas où plusieurs points sont superposés, il faut les décaler légèrement
-                            if nbPoints:
-
-                                if n%2:
-                                    decalage = math.ceil(n/2)+1
-                                else:
-                                    decalage = -(n/2 + 1)
-
-                                k = 0.3
-                                d12 = CreateurBranchementAlgorithm.calculerDistanceEucl(x1, y1, x2, y2)
-                                d13 = CreateurBranchementAlgorithm.calculerDistanceEucl(x1, y1, x2, y1)
-                                angle = math.acos(d13/d12)
-                                dx = k*math.sin(angle)
-                                dy = k*math.cos(angle)
-
-                                if (x2 > x1 and y2 > y1) or (x2 < x1 and y2 < y1):
-                                    y2 -= decalage*dy
-                                    x2 += decalage*dx
-                                else:
-                                    y2 += decalage*dy
-                                    x2 += decalage*dx
-                               
-                                parcelleIds.append(parcId)
-
-                                geometrie = QgsGeometry.fromPointXY(QgsPointXY(x2, y2))
-
-                            else:
-                                caracParcelle2Init, geometrieInit, x1Init, y1Init, x2Init, y2Init = caracParcelle2, geometrie, x1, y1, x2, y2
+                        
+                            caracParcelle2Init, geometrieInit, x1Init, y1Init, x2Init, y2Init = caracParcelle2, geometrie, x1, y1, x2, y2
                             
-                                longueurBranchement = QgsGeometry.fromPolyline([QgsPoint(x1, y1), QgsPoint(x2, y2)]).length()
-                                # Un branchement trop grand est suspect
-                                if longueurBranchement > seuilTailleBranchement:
-                                    jp += 1
-                                    modifNumero = True
+                            longueurBranchement = QgsGeometry.fromPolyline([QgsPoint(x1, y1), QgsPoint(x2, y2)]).length()
+                            # Un branchement trop grand est suspect
+                            if longueurBranchement > seuilTailleBranchement:
+                                jp += 1
+                                modifNumero = True
 
-                                    nearestIds = indexSpatialNumVoie.nearestNeighbor(point.geometry(), jp+1)[jp]
-                                    fit = coucheNumVoie.getFeatures(QgsFeatureRequest().setFilterFid(nearestIds))
-                                    numVoie = QgsFeature()
-                                    fit.nextFeature(numVoie)
+                                nearestIds = indexSpatialNumVoie.nearestNeighbor(point.geometry(), jp+1)[jp]
+                                fit = coucheNumVoie.getFeatures(QgsFeatureRequest().setFilterFid(nearestIds))
+                                numVoie = QgsFeature()
+                                fit.nextFeature(numVoie)
 
-                                    plusProcheIdParcelle = indexSpatialParcelle.nearestNeighbor(numVoie.geometry())[0]
-                                    caracParcelle2, pointSurParcelle = self.trouverVoisinParcelle(point, plusProcheIdParcelle, parcelleData)
-                                    parcId = caracParcelle2.id()
+                                plusProcheIdParcelle = indexSpatialParcelle.nearestNeighbor(numVoie.geometry())[0]
+                                caracParcelle2, pointSurParcelle = self.trouverVoisinParcelle(point, plusProcheIdParcelle, parcelleData)
+                                parcId = caracParcelle2.id()
                                         
-                                    parcelleIds.remove(caracParcelle2Init.id())
-                                    parcelleIds.append(caracParcelle2.id())
+                                parcelleIds.remove(caracParcelle2Init.id())
+                                parcelleIds.append(caracParcelle2.id())
 
-                                    geometrie, x1, y1, x2, y2 = self.testerIntersection(caracParcelle2, caracCanalisation2, x1, pointSurParcelle[0], y1, pointSurParcelle[1])
+                                geometrie, x1, y1, x2, y2 = self.testerIntersection(caracParcelle2, caracCanalisation2, x1, pointSurParcelle[0], y1, pointSurParcelle[1])
 
-                                    # Cas où l'ancien branchement était le plus court
-                                    if QgsGeometry.fromPolyline([QgsPoint(x1, y1), QgsPoint(x2, y2)]).length() > longueurBranchement:
-                                        jp -= 1
-                                        modifNumero = False
+                                # Cas où l'ancien branchement était le plus court
+                                if QgsGeometry.fromPolyline([QgsPoint(x1, y1), QgsPoint(x2, y2)]).length() > longueurBranchement:
+                                    jp -= 1
+                                    modifNumero = False
 
-                                        parcelleIds.remove(caracParcelle2.id())
-                                        parcelleIds.append(caracParcelle2Init.id())
+                                    parcelleIds.remove(caracParcelle2.id())
+                                    parcelleIds.append(caracParcelle2Init.id())
 
-                                        caracParcelle2, geometrie, x1, y1, x2, y2 = caracParcelle2Init, geometrieInit, x1Init, y1Init, x2Init, y2Init
-                                        parcId = caracParcelle2.id()
+                                    caracParcelle2, geometrie, x1, y1, x2, y2 = caracParcelle2Init, geometrieInit, x1Init, y1Init, x2Init, y2Init
+                                    parcId = caracParcelle2.id()
                                 """
                                 # Condition d'unicité de point de desserte par parcelle
                                 if parcelleIds.count(parcId)-1 > nbPoints:###enlever ca et voir
@@ -1100,13 +1083,43 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
 
                                     modifNumero = True"""
 
-                                # Condition de nom de rue similaire
-                                if difflib.SequenceMatcher(a=caracCanalisation2['rue'].lower(), b=point['NOM VOIE'].lower()).ratio() < 0.8:
-                                    parcelleIds.remove(caracParcelle2.id())
-                                    modifNumero, jp, parcId, caracParcelle2, geometrie, x1, y1, x2, y2 = self.changerDeNumero(jp, indexSpatialNumVoie, coucheNumVoie, indexSpatialParcelle, point, parcelleData, caracCanalisation2, x1, y1, nbPoints)
-                                    parcelleIds.append(caracParcelle2.id())
+                            # Condition de nom de rue similaire
+                            if difflib.SequenceMatcher(a=caracCanalisation2['rue'].lower(), b=point['NOM VOIE'].lower()).ratio() < 0.8:
+                                parcelleIds.remove(caracParcelle2.id())
+                                modifNumero, jp, parcId, caracParcelle2, geometrie, x1, y1, x2, y2 = self.changerDeNumero(jp, indexSpatialNumVoie, coucheNumVoie, indexSpatialParcelle, point, parcelleData, caracCanalisation2, x1, y1, nbPoints)
+                                parcelleIds.append(caracParcelle2.id())
 
-                                    modifNumero = True
+                                modifNumero = True
+
+                    if jc == seuilJc:
+                        plusProcheIdCanalisation = indexSpatialCanalisation.nearestNeighbor(pointSurParcelle, jc+1)[jc]
+                        caracCanalisation2, pointSurLigne = self.trouverVoisinCanalisation(pointSurParcelle, plusProcheIdCanalisation, sourceCanalisation)
+                        
+                    # Cas où plusieurs points sont superposés, il faut les décaler légèrement
+                    if nbPoints:
+
+                        if n%2:
+                            decalage = math.ceil(n/2)+1
+                        else:
+                            decalage = -(n/2 + 1)
+
+                        k = 0.3
+                        d12 = CreateurBranchementAlgorithm.calculerDistanceEucl(x1, y1, x2, y2)
+                        d13 = CreateurBranchementAlgorithm.calculerDistanceEucl(x1, y1, x2, y1)
+                        angle = math.acos(d13/d12)
+                        dx = k*math.sin(angle)
+                        dy = k*math.cos(angle)
+
+                        if (x2 > x1 and y2 > y1) or (x2 < x1 and y2 < y1):
+                            y2 -= decalage*dy
+                            x2 += decalage*dx
+                        else:
+                            y2 += decalage*dy
+                            x2 += decalage*dx
+                               
+                        parcelleIds.append(parcId)
+
+                        geometrie = QgsGeometry.fromPointXY(QgsPointXY(x2, y2))
                     
                     # Création des branchements
                     geom = QgsGeometry.fromPolyline([QgsPoint(x1, y1), QgsPoint(x2, y2)])
@@ -1150,9 +1163,6 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
                     #adresseJointureParcelle.getSelectedFeatures().nextFeature(point)
                 
                 avancementAlgo = self.actualiserProgress(feedback, avancementAlgo, m, "")
-                
-                jc = 0
-                seuilJc = 5
 
                 # Identification des branchements vraisemblablement faux
                 estSuspect = False
@@ -1215,23 +1225,78 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
 
                     params = {'INPUT': coucheParcelles, 'EXPRESSION': "\"numVoie\" is null ", 'METHOD': 3}
                     processing.run("qgis:selectbyexpression", params)
-                                            
-                    indexSpatialParcelle = QgsSpatialIndex(coucheParcelles.getSelectedFeatures(), flags=QgsSpatialIndex.FlagStoreFeatureGeometries)
-                    plusProcheIdParcelle = indexSpatialParcelle.nearestNeighbor(point.geometry().asPoint())[0]
-                    caracParcelle2, pointSurParcelle = self.trouverVoisinParcelle(point, plusProcheIdParcelle, parcelleData)
+
+                    couchePointsDesserte = self.creerCouche(pointsDesserte, "Point", pointDesserteFields)
+
+                    params =  {"INPUT": coucheParcelles, "PREDICATE": [0], "INTERSECT": couchePointsDesserte, "METHOD": 3}
+                    processing.run("qgis:selectbylocation", params)
+                                        
+                    canalisations = self.creerCouche(sourceCanalisation.getFeatures(), "LineString", sourceCanalisation)
+
+                    nom = ""
+                    nomVoieListe = point['NOM VOIE'].split(' ')
+                    if len(nomVoieListe) == 1:
+                        nom = point['NOM VOIE']
+                    else:
+                        for i, elt in enumerate(nomVoieListe[1:]):
+                            nom += elt
+                            if i < len(nomVoieListe[1:])-1:
+                                nom += " "
+
+                    params = {'INPUT': canalisations, 'EXPRESSION': "\"rue\" ILIKE '%"+nom+"%'", 'METHOD': 0}
+                    processing.run("qgis:selectbyexpression", params)
+
+                    if canalisations.selectedFeatureCount():
+
+                        caracCanalisation2 = QgsFeature()
+                        canalisations.getSelectedFeatures().nextFeature(caracCanalisation2)
+                        caracCanalisation2.setId(caracCanalisation2['id'])
+
+                        pointSurCanalisation = caracCanalisation2.geometry().closestSegmentWithContext(QgsPointXY(point.geometry().asPoint()))[1]
+                        
+                        coucheNumVoie = self.creerCouche(sourceNumVoie.getFeatures(), "Point", sourceNumVoie)
+
+                        # Sélection des numéros qui sont identiques au numéro de l'adresse
+                        params = {"INPUT": coucheNumVoie, "FIELD": numVoieNom, "VALUE": point[numNom]}
+                        processing.run("qgis:selectbyattribute", params)
+
+                        if coucheNumVoie.selectedFeatureCount():
+
+                            nombreCandidats = coucheNumVoie.selectedFeatureCount()-1
+                            
+                            # Sélection du numéro de voie le plus proche
+                            indexSpatialNumVoie = QgsSpatialIndex(coucheNumVoie.getSelectedFeatures(), flags=QgsSpatialIndex.FlagStoreFeatureGeometries)
+                            nearestId = indexSpatialNumVoie.nearestNeighbor(pointSurCanalisation)[0]
+                            fit = coucheNumVoie.getFeatures(QgsFeatureRequest().setFilterFid(nearestId))
+                            numVoie = QgsFeature()
+                            fit.nextFeature(numVoie)
+
+                            # Sélection de la parcelle la plus proche de ce numéro
+                            plusProcheIdParcelle = indexSpatialParcelle.nearestNeighbor(numVoie.geometry())[0]
+                            plusProcheIdCanalisation = indexSpatialCanalisation.nearestNeighbor(numVoie.geometry().asPoint(), 1)[0]
+                                
+                            caracParcelle2, pointSurParcelle = self.trouverVoisinParcelle(numVoie, plusProcheIdParcelle, parcelleData)
+                            caracCanalisation2, pointSurLigne = self.trouverVoisinCanalisation(numVoie, plusProcheIdCanalisation, sourceCanalisation)
+                        
+                        else:
+                            plusProcheIdParcelle = indexSpatialParcelle.nearestNeighbor(pointSurCanalisation)[0]
+                            caracParcelle2, pointSurParcelle = self.trouverVoisinParcelle(pointSurCanalisation, plusProcheIdParcelle, parcelleData)
+                
+                            plusProcheIdCanalisation = indexSpatialCanalisation.nearestNeighbor(pointSurParcelle, 1)[0]
+                            caracCanalisation2, pointSurLigne = self.trouverVoisinCanalisation(pointSurParcelle, plusProcheIdCanalisation, sourceCanalisation)
+
+                    else:        
+                        plusProcheIdParcelle = indexSpatialParcelle.nearestNeighbor(point.geometry().asPoint())[0]
+                        caracParcelle2, pointSurParcelle = self.trouverVoisinParcelle(point, plusProcheIdParcelle, parcelleData)
+
+                        plusProcheIdCanalisation = indexSpatialCanalisation.nearestNeighbor(pointSurParcelle, 1)[0]
+                        caracCanalisation2, pointSurLigne = self.trouverVoisinCanalisation(pointSurParcelle, plusProcheIdCanalisation, sourceCanalisation)
+                    
                     parcId = caracParcelle2.id()
-                    canalId = pointDesserte['canalId']
+                    canalId = caracCanalisation2.id()
 
                     parcelleIds.append(parcId)
 
-                    caracCanalisation2, pointSurLigne = self.trouverVoisinCanalisation(point, canalId, sourceCanalisation)
-
-                    # Vérification sur la canalisation
-                    while difflib.SequenceMatcher(a=caracCanalisation2['rue'].lower(), b=point['NOM VOIE'].lower()).ratio() < 0.7 and jc < seuilJc:
-                        jc += 1
-                        plusProcheIdCanalisation = indexSpatialCanalisation.nearestNeighbor(point.geometry().asPoint(), jc+1)[jc]
-                        caracCanalisation2, pointSurLigne = self.trouverVoisinCanalisation(point, plusProcheIdCanalisation, sourceCanalisation)
-                        
                     geometrie, x1, y1, x2, y2 = self.testerIntersection(caracParcelle2, caracCanalisation2, pointSurLigne[0], pointSurParcelle[0], pointSurLigne[1], pointSurParcelle[1])
 
                     for liste in pointsDouble:
@@ -1267,7 +1332,7 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
 
                         geometrie = QgsGeometry.fromPointXY(QgsPointXY(x2, y2))
                     
-                    # Création des branchements ###depuis que j'ai desindenté cettte partie ca dit que point est nul, bizzare
+                    # Création des branchements
                     geometrieBranchement = QgsGeometry.fromPolyline([QgsPoint(x1, y1), QgsPoint(x2, y2)])
                     branchements, idBranchement = self.ajouterBranchement(branchementFields, branchements, branchement['id'], parcId, adresseId, canalId, x1, y1, x2, y2, date, point, NULL)
 
@@ -1296,18 +1361,80 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
                 params = {'INPUT': coucheParcelles, 'EXPRESSION': "\"numVoie\" is null ", 'METHOD': 3}
                 processing.run("qgis:selectbyexpression", params)
 
+                couchePointsDesserte = self.creerCouche(pointsDesserte, "Point", pointDesserteFields)
+
+                params =  {"INPUT": coucheParcelles, "PREDICATE": [0], "INTERSECT": couchePointsDesserte, "METHOD": 3}
+                processing.run("qgis:selectbylocation", params)  
+
                 indexSpatialParcelle = QgsSpatialIndex(coucheParcelles.getSelectedFeatures(), flags=QgsSpatialIndex.FlagStoreFeatureGeometries)
-                plusProcheIdParcelle = indexSpatialParcelle.nearestNeighbor(point.geometry().asPoint())[0]
-                caracParcelle2, pointSurParcelle = self.trouverVoisinParcelle(point, plusProcheIdParcelle, parcelleData)
+
+                canalisations = self.creerCouche(sourceCanalisation.getFeatures(), "LineString", sourceCanalisation)
+
+                nom = ""
+                nomVoieListe = point['NOM VOIE'].split(' ')
+                if len(nomVoieListe) == 1:
+                    nom = point['NOM VOIE']
+                else:
+                    for i, elt in enumerate(nomVoieListe[1:]):
+                        nom += elt
+                        if i < len(nomVoieListe[1:])-1:
+                            nom += " "
+
+                params = {'INPUT': canalisations, 'EXPRESSION': "\"rue\" ILIKE '%"+nom+"%'", 'METHOD': 0}
+                processing.run("qgis:selectbyexpression", params)
+
+                if canalisations.selectedFeatureCount():
+
+                    caracCanalisation2 = QgsFeature()
+                    canalisations.getSelectedFeatures().nextFeature(caracCanalisation2)
+                    caracCanalisation2.setId(caracCanalisation2['id'])
+
+                    pointSurCanalisation = caracCanalisation2.geometry().closestSegmentWithContext(QgsPointXY(point.geometry().asPoint()))[1]
+                    
+                    coucheNumVoie = self.creerCouche(sourceNumVoie.getFeatures(), "Point", sourceNumVoie)
+
+                    # Sélection des numéros qui sont identiques au numéro de l'adresse
+                    params = {"INPUT": coucheNumVoie, "FIELD": numVoieNom, "VALUE": point[numNom]}
+                    processing.run("qgis:selectbyattribute", params)
+
+                    # Première itération sur toutes les adresses, une fois tous les branchements créés,
+                    # une vérification et une rectification sera faite pour les branchements suspects
+                    if coucheNumVoie.selectedFeatureCount():
+
+                        nombreCandidats = coucheNumVoie.selectedFeatureCount()-1
+                        
+                        # Sélection du numéro de voie le plus proche
+                        indexSpatialNumVoie = QgsSpatialIndex(coucheNumVoie.getSelectedFeatures(), flags=QgsSpatialIndex.FlagStoreFeatureGeometries)
+                        nearestId = indexSpatialNumVoie.nearestNeighbor(pointSurCanalisation.geometry())[0]
+                        fit = coucheNumVoie.getFeatures(QgsFeatureRequest().setFilterFid(nearestId))
+                        numVoie = QgsFeature()
+                        fit.nextFeature(numVoie)
+
+                        # Sélection de la parcelle la plus proche de ce numéro
+                        plusProcheIdParcelle = indexSpatialParcelle.nearestNeighbor(numVoie.geometry())[0]
+                        plusProcheIdCanalisation = indexSpatialCanalisation.nearestNeighbor(numVoie.geometry().asPoint(), 1)[0]
+                            
+                        caracParcelle2, pointSurParcelle = self.trouverVoisinParcelle(numVoie, plusProcheIdParcelle, parcelleData)
+                        caracCanalisation2, pointSurLigne = self.trouverVoisinCanalisation(numVoie, plusProcheIdCanalisation, sourceCanalisation)
+                    
+                    else:
+                        plusProcheIdParcelle = indexSpatialParcelle.nearestNeighbor(pointSurCanalisation)[0]
+                        caracParcelle2, pointSurParcelle = self.trouverVoisinParcelle(pointSurCanalisation, plusProcheIdParcelle, parcelleData)
+            
+                else:        
+                    plusProcheIdParcelle = indexSpatialParcelle.nearestNeighbor(point.geometry().asPoint())[0]
+                    caracParcelle2, pointSurParcelle = self.trouverVoisinParcelle(point, plusProcheIdParcelle, parcelleData)
+
+                    plusProcheIdCanalisation = indexSpatialCanalisation.nearestNeighbor(pointSurParcelle, 1)[0]
+                    caracCanalisation2, pointSurLigne = self.trouverVoisinCanalisation(pointSurParcelle, plusProcheIdCanalisation, sourceCanalisation)
+                
                 parcId = caracParcelle2.id()
-                canalId = pointDesserte['canalId']
+                canalId = caracCanalisation2.id()
 
                 parcelleIds.append(parcId)
-                        
-                caracCanalisation2, pointSurLigne = self.trouverVoisinCanalisation(point, canalId, sourceCanalisation)
 
                 geometrie, x1, y1, x2, y2 = self.testerIntersection(caracParcelle2, caracCanalisation2, pointSurLigne[0], pointSurParcelle[0], pointSurLigne[1], pointSurParcelle[1])
-                
+
                 # Check si le point est un point multiple
                 for liste in pointsDouble:
                     if point['fid'] in liste:
@@ -1369,6 +1496,7 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
                 self.actualiserProgress(feedback, avancementAlgo, m, "")
 
                 if branchement['parcelleId']: # Branchements avec numéro postal égal à 0
+                    feedback.pushInfo(str(branchement['canalId']))
                     sus = self.estSuspect(branchement, branchementFields, sourceCanalisation, branchements, adresseJointureParcelle)
                     
                     for p in pointsDesserte:
@@ -1388,7 +1516,7 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
 
                     branchement.setAttributes(champs)
 
-                    champs = []
+                    champs = []####parfois ya plusieurs canalisation qui ont le meme nom de rue et du coup y selectionne pas la bonne, regler cas
                     for field in pointDesserte.fields():
                         if field.name() != 'suspect':
                             champs.append(pointDesserte[field.name()])
