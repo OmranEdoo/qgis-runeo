@@ -96,6 +96,7 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
 
     ADRESSE = 'ADRESSE'
     CODEPOSTAL = 'CODEPOSTAL'
+    CHAMPNOMVOIE = 'CHAMPNOMVOIE'
     CHAMPADRESSE = 'CHAMPADRESSE'
     CHAMPNUM = 'CHAMPNUM'
     NUMVOIE = 'NUMVOIE'
@@ -104,6 +105,7 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
     ROUTE = 'ROUTE'
     CHAMPRUE = 'CHAMPRUE'
     CANALISATION = 'CANALISATION'
+    CHAMPNOMRUE = 'CHAMPNOMRUE'
     BRANCHEMENTENTREE = 'BRANCHEMENTENTREE'
     POINTDESSERTEENTREE = 'POINTDESSERTEENTREE'
     BRANCHEMENTSORTIE = 'BRANCHEMENTSORTIE'
@@ -237,7 +239,7 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
         for elt in adresseJointureParcelle.getSelectedFeatures():
             point = elt
 
-        score += self.adresseEstSimilaire(canalisation['rue'], point['NOM VOIE'])*10
+        score += self.adresseEstSimilaire(canalisation[rueNomCanal], point[rueNomClient])*10
 
         return score
     
@@ -496,6 +498,17 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
             )
         )
 
+        # Nom de la colonne rescencant les noms de voie dans la table clientèle
+        self.addParameter(
+            QgsProcessingParameterField(
+                self.CHAMPNOMVOIE,
+                self.tr('Champ du nom de la voie'),
+                parentLayerParameterName = self.ADRESSE,
+                allowMultiple=False,
+                optional=False,
+            )
+        )
+
         # Nom de la colonne donnant l'adresse complète
         self.addParameter(
             QgsProcessingParameterField(
@@ -558,6 +571,17 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
                 [QgsProcessing.TypeVectorLine]
             )
         )
+
+        # Nom de la colonne du champ indiquant la rue dans la table des canalisations
+        self.addParameter(
+            QgsProcessingParameterField(
+                self.CHAMPNOMRUE,
+                self.tr('Champ du nom de la rue de la couche des canalisations'),
+                parentLayerParameterName = self.CANALISATION,
+                allowMultiple=False,
+                optional=False,
+            )
+        )
         
         # Couche des points de desserte
         self.addParameter(
@@ -606,6 +630,7 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
 
         # Accès aux paramêtres d'entrée
         sourceAdresse = self.parameterAsSource(parameters, self.ADRESSE, context)
+        rueNomClient = self.parameterAsSource(parameters, self.CHAMPNOMVOIE, context)[0]
         sourcePointDesserte = self.parameterAsSource(parameters, self.POINTDESSERTEENTREE, context)
         sourceBranchement = self.parameterAsSource(parameters, self.BRANCHEMENTENTREE, context)
         codePostalNom = self.parameterAsFields(parameters, self.CODEPOSTAL, context)[0]
@@ -615,6 +640,7 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
         numVoieNom = self.parameterAsFields(parameters, self.CHAMPNUMVOIE, context)[0]
         numVoieId = self.parameterAsFields(parameters, self.CHAMPIDNUMVOIE, context)[0]
         sourceCanalisation = self.parameterAsSource(parameters, self.CANALISATION, context)
+        rueNomCanal = self.parameterAsSource(parameters, self.CHAMPNOMRUE, context)[0]
 
         numVoiePresent = False
         # Check si la couche numéro de voie a été entré par l'utilisateur
@@ -981,7 +1007,7 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
                     caracCanalisation2, pointSurLigne = self.trouverVoisinCanalisation(point, plusProcheIdCanalisation, sourceCanalisation)
                     
                     # Vérification sur la canalisation
-                    while difflib.SequenceMatcher(a=caracCanalisation2['rue'].lower(), b=point['NOM VOIE'].lower()).ratio() < 0.8 and jc < seuilJc:###mettre les deux champs en parametres
+                    while difflib.SequenceMatcher(a=caracCanalisation2[rueNomCanal].lower(), b=point[rueNomClient].lower()).ratio() < 0.8 and jc < seuilJc:
                         jc += 1
                         plusProcheIdCanalisation = indexSpatialCanalisation.nearestNeighbor(point.geometry().asPoint(), jc+1)[jc]
                         caracCanalisation2, pointSurLigne = self.trouverVoisinCanalisation(point, plusProcheIdCanalisation, sourceCanalisation)
@@ -1087,7 +1113,7 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
                                     modifNumero = True"""
 
                             # Condition de nom de rue similaire
-                            if difflib.SequenceMatcher(a=caracCanalisation2['rue'].lower(), b=point['NOM VOIE'].lower()).ratio() < 0.8:
+                            if difflib.SequenceMatcher(a=caracCanalisation2[rueNomCanal].lower(), b=point[rueNomClient].lower()).ratio() < 0.8:
                                 parcelleIds.remove(caracParcelle2.id())
                                 modifNumero, jp, parcId, caracParcelle2, geometrie, x1, y1, x2, y2 = self.changerDeNumero(jp, indexSpatialNumVoie, coucheNumVoie, indexSpatialParcelle, point, parcelleData, caracCanalisation2, x1, y1, nbPoints)
                                 parcelleIds.append(caracParcelle2.id())
@@ -1519,7 +1545,7 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
 
                     branchement.setAttributes(champs)
 
-                    champs = []####parfois ya plusieurs canalisation qui ont le meme nom de rue et du coup y selectionne pas la bonne, regler cas
+                    champs = []
                     for field in pointDesserte.fields():
                         if field.name() != 'suspect':
                             champs.append(pointDesserte[field.name()])
