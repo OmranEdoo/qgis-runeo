@@ -802,9 +802,12 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
         pointsDesserte = []
         branchements = []
 
+        pointsDesserteAncien = []
+        branchementsAncien =  []
+        
         if sourcePointDesserte and sourceBranchement:
-            pointsDesserte = [f for f in sourcePointDesserte.getFeatures()]
-            branchements = [f for f in sourceBranchement.getFeatures()]
+            pointsDesserteAncien = [f for f in sourcePointDesserte.getFeatures()]
+            branchementsAncien = [f for f in sourceBranchement.getFeatures()]
 
         pointsRestants = []
 
@@ -1117,8 +1120,6 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
                             y2 += decalage*dy
                             x2 += decalage*dx
                                
-                        parcelleIds.append(parcId)
-
                         geometrie = QgsGeometry.fromPointXY(QgsPointXY(x2, y2))
                     
                     # Création des branchements
@@ -1192,6 +1193,7 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
                     estSuspect = True
                 
                 if estSuspect:
+
                     nbPoints = 0
                     nbSuspect += 1
                     # Supression des anciens branchements modifiés et de leurs points de desserte
@@ -1221,7 +1223,8 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
                     coucheParcelles.select(parcelleIds)
                     coucheParcelles.invertSelection()
 
-                    parcelleIds.remove(branchement['parcelleId'])
+                    if branchement['parcelleId'] in parcelleIds:
+                        parcelleIds.remove(branchement['parcelleId'])
 
                     params = {'INPUT': coucheParcelles, 'EXPRESSION': "\"numVoie\" is null ", 'METHOD': 3}
                     processing.run("qgis:selectbyexpression", params)
@@ -1243,7 +1246,15 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
                             if i < len(nomVoieListe[1:])-1:
                                 nom += " "
 
-                    params = {'INPUT': canalisations, 'EXPRESSION': "\"rue\" ILIKE '%"+nom+"%'", 'METHOD': 0}
+                    nomB = ""
+                    for car in nom:
+                        if car == "'":
+                            nomB += "\'"
+                        else:
+                            nomB += car
+
+
+                    params = {'INPUT': canalisations, 'EXPRESSION': "\"rue\" ILIKE '%"+nomB+"%'", 'METHOD': 0}
                     processing.run("qgis:selectbyexpression", params)
 
                     if canalisations.selectedFeatureCount():
@@ -1328,8 +1339,6 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
                             y2 += decalage*dy
                             x2 += decalage*dx
                                
-                        parcelleIds.append(parcId)
-
                         geometrie = QgsGeometry.fromPointXY(QgsPointXY(x2, y2))
                     
                     # Création des branchements
@@ -1397,8 +1406,6 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
                     params = {"INPUT": coucheNumVoie, "FIELD": numVoieNom, "VALUE": point[numNom]}
                     processing.run("qgis:selectbyattribute", params)
 
-                    # Première itération sur toutes les adresses, une fois tous les branchements créés,
-                    # une vérification et une rectification sera faite pour les branchements suspects
                     if coucheNumVoie.selectedFeatureCount():
 
                         nombreCandidats = coucheNumVoie.selectedFeatureCount()-1
@@ -1465,8 +1472,6 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
                         y2 += decalage*dy
                         x2 += decalage*dx
                                
-                    parcelleIds.append(parcId)
-
                     geometrie = QgsGeometry.fromPointXY(QgsPointXY(x2, y2))
                 
                 branchements, idBranchement = self.ajouterBranchement(branchementFields, branchements, branchement['id'], parcId, adresseId, canalId, x1, y1, x2, y2, date, point, NULL)
@@ -1489,16 +1494,14 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
 
             l = len(branchementsCopie2)
             m = 20/l
-
+            
             # Remplissage du champ suspect
             for branchement in branchementsCopie2:
 
                 self.actualiserProgress(feedback, avancementAlgo, m, "")
-
-                if branchement['parcelleId']: # Branchements avec numéro postal égal à 0
-                    feedback.pushInfo(str(branchement['canalId']))
+                if branchement['parcelleId']: 
                     sus = self.estSuspect(branchement, branchementFields, sourceCanalisation, branchements, adresseJointureParcelle)
-                    
+                        
                     for p in pointsDesserte:
                         if p["adresseId"] == branchement['adresseId']:
                             pointDesserte = p
@@ -1527,6 +1530,9 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
 
                     branchements.append(branchement)
                     pointsDesserte.append(pointDesserte)
+        
+            pointsDesserte = pointsDesserteAncien + pointsDesserte
+            branchements = branchementsAncien + branchements
 
         # Cas où la couche des numéros de voie n'a pas été renseignée
         else:
