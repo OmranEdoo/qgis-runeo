@@ -1,7 +1,4 @@
 # -*- coding: utf-8 -*-
-cheminCodeInsee = 'C:\Users\omran\AppData\Roaming\QGIS\QGIS3\profiles\default\python\plugins\createur_branchement\correspondance-code-insee-code-postal-reunion.csv'
-cheminBdParcellaire = 'C:\\Users\\omran\\AppData\\Roaming\\QGIS\\QGIS3\\profiles\\default\\python\\plugins\\createur_branchement\\BDPARCELLAIRE_1-2_VECTEUR_SHP_RGR92UTM40S_D974_2018-09-06\\BDPARCELLAIRE\\1_DONNEES_LIVRAISON_2018-09-00112\\BDPV_1-2_SHP_RGR92UTM40S_D974\\'
-
 """
 /***************************************************************************
  CreateurBranchement
@@ -629,6 +626,9 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
         """"
         Here is where the processing itself takes place.
         """
+        cheminCodeInsee = 'D:\omran\Runeo\data\correspondance-code-insee-code-postal-reunion.csv'
+        cheminBdParcellaire = 'D:\\omran\\IGN\\BDPARCELLAIRE_1-2_VECTEUR_SHP_RGR92UTM40S_D974_2018-09-06\\BDPARCELLAIRE\\1_DONNEES_LIVRAISON_2018-09-00112\\BDPV_1-2_SHP_RGR92UTM40S_D974\\'
+
         avancementAlgo = 0
         k = 1.5
         self.actualiserProgress(feedback, avancementAlgo, 1, "Début de l'algorithme...")
