@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+cheminCodeInsee = 'C:\Users\omran\AppData\Roaming\QGIS\QGIS3\profiles\default\python\plugins\createur_branchement\correspondance-code-insee-code-postal-reunion.csv'
+cheminBdParcellaire = 'C:\\Users\\omran\\AppData\\Roaming\\QGIS\\QGIS3\\profiles\\default\\python\\plugins\\createur_branchement\\BDPARCELLAIRE_1-2_VECTEUR_SHP_RGR92UTM40S_D974_2018-09-06\\BDPARCELLAIRE\\1_DONNEES_LIVRAISON_2018-09-00112\\BDPV_1-2_SHP_RGR92UTM40S_D974\\'
 
 """
 /***************************************************************************
@@ -22,7 +24,7 @@
  ***************************************************************************/
 """
 
-__author__ = 'Runeo'
+__author__ = 'Omran Edoo'
 __date__ = '2022-06-10'
 __copyright__ = '(C) 2022 by Runeo'
 
@@ -217,7 +219,7 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
             return True
         return False
 
-    def estSuspect(self, branchement, branchementFields, sourceCanalisation, branchements, adresseJointureParcelle):
+    def estSuspect(self, branchement, branchementFields, sourceCanalisation, branchements, adresseJointureParcelle, rueNomCanal, rueNomClient):
 
         score = 0
         
@@ -418,8 +420,11 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
         """ Fonction permettant de changer de parcelle à analyser, on sélectionne une parcelle moins proche """
         modifNumero = True
         jp += 1
-
-        nearestIds = indexSpatialNumVoie.nearestNeighbor(point.geometry(), jp+1)[jp]
+        try:
+            nearestIds = indexSpatialNumVoie.nearestNeighbor(point.geometry(), jp+1)[jp]
+        except:
+            jp -= 1
+            nearestIds = indexSpatialNumVoie.nearestNeighbor(point.geometry(), jp+1)[jp]
         fit = coucheNumVoie.getFeatures(QgsFeatureRequest().setFilterFid(nearestIds))
         numVoie = QgsFeature()
         fit.nextFeature(numVoie)
@@ -630,7 +635,7 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
 
         # Accès aux paramêtres d'entrée
         sourceAdresse = self.parameterAsSource(parameters, self.ADRESSE, context)
-        rueNomClient = self.parameterAsSource(parameters, self.CHAMPNOMVOIE, context)[0]
+        rueNomClient = self.parameterAsFields(parameters, self.CHAMPNOMVOIE, context)[0]
         sourcePointDesserte = self.parameterAsSource(parameters, self.POINTDESSERTEENTREE, context)
         sourceBranchement = self.parameterAsSource(parameters, self.BRANCHEMENTENTREE, context)
         codePostalNom = self.parameterAsFields(parameters, self.CODEPOSTAL, context)[0]
@@ -640,7 +645,7 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
         numVoieNom = self.parameterAsFields(parameters, self.CHAMPNUMVOIE, context)[0]
         numVoieId = self.parameterAsFields(parameters, self.CHAMPIDNUMVOIE, context)[0]
         sourceCanalisation = self.parameterAsSource(parameters, self.CANALISATION, context)
-        rueNomCanal = self.parameterAsSource(parameters, self.CHAMPNOMRUE, context)[0]
+        rueNomCanal = self.parameterAsFields(parameters, self.CHAMPNOMRUE, context)[0]
 
         numVoiePresent = False
         # Check si la couche numéro de voie a été entré par l'utilisateur
@@ -698,7 +703,7 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
         codesInsee = []
 
         # Conversion des codes postaux en codes INSEE car certains fichiers de la BD PARCELLAIRE ne contiennent que le champ code INSEE
-        with open('D:\omran\Runeo\data\correspondance-code-insee-code-postal-reunion.csv', mode ='r') as file:   
+        with open(cheminCodeInsee, mode ='r') as file:   
             # reading the CSV file
             csvFile = csv.DictReader(file)
              
@@ -720,7 +725,7 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
                 sourceAdresse[numNom] = numero
         
         # Création de copie des couches de la BD PARCELLAIRE
-        file = 'D:\\omran\\IGN\\BDPARCELLAIRE_1-2_VECTEUR_SHP_RGR92UTM40S_D974_2018-09-06\\BDPARCELLAIRE\\1_DONNEES_LIVRAISON_2018-09-00112\\BDPV_1-2_SHP_RGR92UTM40S_D974\\'
+        file = cheminBdParcellaire
         listeCoucheParcel = ['COMMUNE', 'BATIMENT', 'PARCELLE']#, 'DIVCAD', 'LOCALISANT'] # Nom des couches que l'on souhaite afficher
                 
         for nomCouche in listeCoucheParcel:
@@ -1263,9 +1268,9 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
                     canalisations = self.creerCouche(sourceCanalisation.getFeatures(), "LineString", sourceCanalisation)
 
                     nom = ""
-                    nomVoieListe = point['NOM VOIE'].split(' ')
+                    nomVoieListe = point[rueNomClient].split(' ')
                     if len(nomVoieListe) == 1:
-                        nom = point['NOM VOIE']
+                        nom = point[rueNomClient]
                     else:
                         for i, elt in enumerate(nomVoieListe[1:]):
                             nom += elt
@@ -1275,7 +1280,7 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
                     nomB = ""
                     for car in nom:
                         if car == "'":
-                            nomB += "\'"
+                            nomB += "''"
                         else:
                             nomB += car
 
@@ -1415,7 +1420,14 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
                         if i < len(nomVoieListe[1:])-1:
                             nom += " "
 
-                params = {'INPUT': canalisations, 'EXPRESSION': "\"rue\" ILIKE '%"+nom+"%'", 'METHOD': 0}
+                nomB = ""
+                for car in nom:
+                    if car == "'":
+                        nomB += "''"
+                    else:
+                        nomB += car
+
+                params = {'INPUT': canalisations, 'EXPRESSION': "\"rue\" ILIKE '%"+nomB+"%'", 'METHOD': 0}
                 processing.run("qgis:selectbyexpression", params)
 
                 if canalisations.selectedFeatureCount():
@@ -1526,7 +1538,7 @@ class CreateurBranchementAlgorithm(QgsProcessingAlgorithm):
 
                 self.actualiserProgress(feedback, avancementAlgo, m, "")
                 if branchement['parcelleId']: 
-                    sus = self.estSuspect(branchement, branchementFields, sourceCanalisation, branchements, adresseJointureParcelle)
+                    sus = self.estSuspect(branchement, branchementFields, sourceCanalisation, branchements, adresseJointureParcelle, rueNomCanal, rueNomClient)
                         
                     for p in pointsDesserte:
                         if p["adresseId"] == branchement['adresseId']:
